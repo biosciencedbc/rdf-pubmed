@@ -9,7 +9,7 @@ WORK=/work
 DATA=/data
 BASE_URL=ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline
 UPDATE_URL=ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles
-FORCE_CONVERT=1
+FORCE_CONVERT=0
 # オプションの読み取り
 while getopts f OPT
 do
@@ -25,7 +25,13 @@ mkdir -p $WORK/baseline
 
 # baselineのダウンロード
 cd $WORK/baseline
+
+now=`date "+%Y%m%d-%H%M%S"`
+echo "Started wget baseline at $now"
 wget  -r -nd -c -N -A xml.gz $BASE_URL 2> /baseline_wget.log
+now=`date "+%Y%m%d-%H%M%S"`
+echo "Finished wget baseline at $now"
+
 cat /baseline_wget.log
 baseline_num_of_newfiles=`egrep "' saved \[[0-9]+\]" /baseline_wget.log | grep -v "'.listing' saved" | wc -l `
   
@@ -33,9 +39,11 @@ baseline_num_of_newfiles=`egrep "' saved \[[0-9]+\]" /baseline_wget.log | grep -
 if [ ! $baseline_num_of_newfiles -eq 0 ] || [ ! -e /work/dup_pmid.tsv ]; then
   rm -f /work/dup_pmid.tsv
   # baseline内の重複したPMIDを抜きだし、最新の更新日の値とペアで出力する
-  echo 
-  echo "Generating /work/dup_pmid.tsv"
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Started generating /work/dup_pmid.tsv at $now"
   ruby /pubmed_dup_check.rb
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Finished generating /work/dup_pmid.tsv at $now"
 fi
 
 # ディレクトリの作成
@@ -44,13 +52,17 @@ mkdir -p $WORK/updatefiles
 # updatefilesのダウンロード
 cd $WORK/updatefiles
 
+now=`date "+%Y%m%d-%H%M%S"`
+echo "Started wget updatefiles at $now"
 wget  -r -nd -c -N -A xml.gz $UPDATE_URL 2>/wget.log
 cat /wget.log > /dev/stdout
+now=`date "+%Y%m%d-%H%M%S"`
+echo "Finished wget updatefiles at $now"
 
 num_of_newfiles=`egrep "' saved \[[0-9]+\]" /wget.log | grep -v "'.listing' saved" | wc -l `
 
 # アーカイブファイルに更新がなく、fオプションが指定されていない場合はコンバートを実行しない
-if [ $num_of_newfiles -eq 0 ] || [ $FORCE_CONVERT -eq 0 ]; then
+if [ $num_of_newfiles -eq 0 ] && [ $FORCE_CONVERT -eq 0 ]; then
   echo
   echo "No RDF files were generated because no new files were found at the download site."
   exit 0
@@ -59,18 +71,33 @@ fi
 cd / 
 
 # baselineの重複したPMID一覧存在しない場合は変換しない
-if [ -f $WORK/dup_pmids.tsv ]; then
+if [ -f $WORK/dup_pmid.tsv ]; then
   # 削除されたPMIDのリスト作成
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Started ruby pubmed_delete_citation.rb at $now"
   ls -d $WORK/updatefiles/pubmed*.xml.gz | xargs -P10 -n1 -IFILE ruby pubmed_delete_citation.rb FILE skip_pmids.txt
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Finished ruby pubmed_delete_citation.rb at $now"
 
   # 変換の実行(updatefile)
+
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Started ruby /pubmed_updatefiles_converter.rb at $now"
   ls -rd $WORK/updatefiles/pubmed*.xml.gz | xargs -P1 -n1 -IFILE ruby /pubmed_updatefiles_converter.rb FILE skip_pmids.txt
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Finished ruby  /pubmed_updatefiles_converter.rb at $now"
+
+
   # 変換の実行(baseline 5並列)
-  ls -rd $WORK/baseline/pubmed*.xml.gz | xargs -P10 -n1 -IFILE ruby /pubmed_baseline_converter.rb FILE skip_pmids.txt $WORK/dup_pmids.tsv
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Started ruby /pubmed_baseline_converter.rb  at $now"
+  ls -rd $WORK/baseline/pubmed*.xml.gz | xargs -P10 -n1 -IFILE ruby /pubmed_baseline_converter.rb FILE skip_pmids.txt $WORK/dup_pmid.tsv
+  now=`date "+%Y%m%d-%H%M%S"`
+  echo "Finished ruby /pubmed_baseline_converter.rb  at $now"
 
   chmod -R 666 $(ls -d $WORK/**/pubmed*.xml.gz) && chmod -R 666 $(ls -d $DATA/pubmed*.ttl)
 else
-  echo "dump_pmids.tsvが存在しないことはありえない。" 
+  echo "dump_pmid.tsvが存在しないことはありえない。" 
   exit 1 
 fi
 
